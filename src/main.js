@@ -1,66 +1,188 @@
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { toMeters } from "./geo.js";
 
-// Round 1 scene: isometric camera, sea, land, placeholder coast.
-// Buildings and roads from OSM are added once data/kaleici-konyaalti.osm.json exists.
+// Scene built from data/kaleici.json (converted from OpenStreetMap, ODbL).
+// Coordinates are local meters: x = east, z = south (three.js: -z is north).
 
-const canvasHost = document.body;
+const DATA_URL = "data/kaleici.json";
+const CENTER = toMeters(36.8835, 30.704); // middle of the Kaleiçi box
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-canvasHost.appendChild(renderer.domElement);
+document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#3fb6c4"); // sea color, so no light edge shows when zoomed out
+scene.background = new THREE.Color("#3fb6c4");
 
-// Orthographic camera at a true isometric angle (~35.26° pitch, 45° yaw).
+// Orthographic camera at a true isometric angle, centered on the old town.
+let frustum = 1300;
 const aspect = () => window.innerWidth / window.innerHeight;
-let frustum = 2600;
-const camera = new THREE.OrthographicCamera(-frustum * aspect(), frustum * aspect(), frustum, -frustum, 1, 10000);
-camera.position.set(1000, 1000, 1000);
-camera.lookAt(0, 0, 0);
+const camera = new THREE.OrthographicCamera(-frustum * aspect(), frustum * aspect(), frustum, -frustum, 1, 20000);
+camera.position.set(CENTER[0] + 1000, 1000, CENTER[1] + 1000);
+camera.lookAt(CENTER[0], 0, CENTER[1]);
 
-// Warm Ghibli-ish light
+// Warm, soft light
 const sun = new THREE.DirectionalLight("#fff3d6", 1.6);
-sun.position.set(-600, 900, 400);
+sun.position.set(CENTER[0] - 600, 900, CENTER[1] + 400);
+sun.target.position.set(CENTER[0], 0, CENTER[1]);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 Object.assign(sun.shadow.camera, { left: -1500, right: 1500, top: 1500, bottom: -1500, near: 1, far: 4000 });
-scene.add(sun);
+scene.add(sun, sun.target);
 scene.add(new THREE.HemisphereLight("#dff6f2", "#8a9c6a", 0.9));
 
-// Sea: a big plane covering the bay
-const sea = new THREE.Mesh(
-  new THREE.PlaneGeometry(60000, 60000),
-  new THREE.MeshLambertMaterial({ color: "#3fb6c4" })
-);
+// Sea and land (placeholder plates until coastline polygons are built)
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), new THREE.MeshLambertMaterial({ color: "#3fb6c4" }));
 sea.rotation.x = -Math.PI / 2;
 sea.position.y = -2;
 sea.receiveShadow = true;
 scene.add(sea);
 
-// Land: placeholder plate north of a straight coastline (replaced by OSM coastline polygons later).
-// Coast is ~lat 36.875 => z ≈ +555 m. Land occupies z < 555; sea is south of it.
-const COAST_Z = 555;
-const land = new THREE.Mesh(
-  new THREE.BoxGeometry(12000, 4, 12000),
-  new THREE.MeshLambertMaterial({ color: "#a8c77a" })
-);
-land.position.set(0, 0, COAST_Z - 6000);
+const land = new THREE.Mesh(new THREE.BoxGeometry(12000, 4, 12000), new THREE.MeshLambertMaterial({ color: "#a8c77a" }));
+land.position.set(0, 0, 555 - 6000); // coast ≈ z 555 m
 land.receiveShadow = true;
 scene.add(land);
 
-// Demo marker so the projection can be checked: Kaleiçi clock tower area
-const [mx, mz] = toMeters(36.8849, 30.7056);
-const marker = new THREE.Mesh(
-  new THREE.BoxGeometry(20, 60, 20),
-  new THREE.MeshLambertMaterial({ color: "#e8a86b" })
-);
-marker.position.set(mx, 30, mz);
-marker.castShadow = true;
-scene.add(marker);
+// ---------- helpers ----------
+
+const stripClosing = (pts) => {
+  if (pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) return pts.slice(0, -1);
+  return pts;
+};
+
+// Building: footprint extruded upward. Shape y = -z so the rotation lands it at world z.
+function buildingGeometry(b) {
+  const pts = stripClosing(b.pts);
+  if (pts.length < 3) return null;
+  const shape = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: b.h, bevelEnabled: false });
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+// Flat polygon (parks, beaches)
+function polygonGeometry(pts) {
+  const p = stripClosing(pts);
+  if (p.length < 3) return null;
+  const shape = new THREE.Shape(p.map(([x, z]) => new THREE.Vector2(x, -z)));
+  const geo = new THREE.ShapeGeometry(shape);
+  geo.rotateX(-Math.PI / 2);
+  return geo;
+}
+
+// Ribbon along a polyline with a given width, lying flat at height y
+function ribbonGeometry(pts, width, y) {
+  const pos = [];
+  const hw = width / 2;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x0, z0] = pts[i];
+    const [x1, z1] = pts[i + 1];
+    const dx = x1 - x0, dz = z1 - z0;
+    const len = Math.hypot(dx, dz);
+    if (len < 0.01) continue;
+    const nx = (-dz / len) * hw, nz = (dx / len) * hw;
+    const a = [x0 + nx, y, z0 + nz], b = [x0 - nx, y, z0 - nz];
+    const c = [x1 + nx, y, z1 + nz], d = [x1 - nx, y, z1 - nz];
+    pos.push(...a, ...b, ...c, ...b, ...d, ...c);
+  }
+  if (!pos.length) return null;
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
+const ROAD_WIDTH = {
+  motorway: 16, trunk: 14, primary: 11, secondary: 9, tertiary: 8,
+  residential: 6, living_street: 5, pedestrian: 5, service: 3.5,
+  footway: 2, path: 1.5, steps: 1.5,
+};
+const ROAD_COLOR = {
+  motorway: "#f0b96b", trunk: "#f0b96b", primary: "#f7e7b8", secondary: "#f7efd9",
+  tertiary: "#f7efd9", residential: "#fbf6ea", living_street: "#fbf6ea",
+  pedestrian: "#e9d9bd", service: "#e4dccb", footway: "#d9c8a4", path: "#c8b58f", steps: "#c8b58f",
+};
+
+const BUILDING_BANDS = [
+  { max: 6, color: "#f4e6c9" },   // low: cream
+  { max: 12, color: "#e8c7a0" },  // mid: warm sand
+  { max: Infinity, color: "#d9a57e" }, // tall: terracotta
+];
+const bandFor = (h) => BUILDING_BANDS.find((b) => h <= b.max).color;
+
+// ---------- load and build ----------
+
+const res = await fetch(DATA_URL);
+if (!res.ok) throw new Error(`Could not load ${DATA_URL} (${res.status}). Run tools/fetch-osm.mjs and tools/osm-to-json.mjs first.`);
+const data = await res.json();
+
+// Buildings grouped by color, merged per group
+const buildingGroups = new Map();
+for (const b of data.buildings) {
+  const g = buildingGeometry(b);
+  if (!g) continue;
+  const color = bandFor(b.h);
+  if (!buildingGroups.has(color)) buildingGroups.set(color, []);
+  buildingGroups.get(color).push(g);
+}
+for (const [color, geos] of buildingGroups) {
+  const merged = mergeGeometries(geos);
+  const mesh = new THREE.Mesh(merged, new THREE.MeshLambertMaterial({ color, flatShading: true }));
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// Roads grouped by kind-color
+const roadGroups = new Map();
+for (const r of data.roads) {
+  const width = ROAD_WIDTH[r.kind] ?? 4;
+  const color = ROAD_COLOR[r.kind] ?? "#f7efd9";
+  const g = ribbonGeometry(r.pts, width, 0.6);
+  if (!g) continue;
+  if (!roadGroups.has(color)) roadGroups.set(color, []);
+  roadGroups.get(color).push(g);
+}
+for (const [color, geos] of roadGroups) {
+  const mesh = new THREE.Mesh(mergeGeometries(geos), new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide }));
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// Parks and beaches
+const parkGeos = data.parks.map((p) => polygonGeometry(p.pts)).filter(Boolean);
+if (parkGeos.length) {
+  const mesh = new THREE.Mesh(mergeGeometries(parkGeos), new THREE.MeshLambertMaterial({ color: "#9bcf7a" }));
+  mesh.position.y = 0.4;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// Coastline as a light foam line
+const coastGeos = data.coast.map((c) => ribbonGeometry(c.pts, 3, 1.2)).filter(Boolean);
+if (coastGeos.length) {
+  scene.add(new THREE.Mesh(mergeGeometries(coastGeos), new THREE.MeshBasicMaterial({ color: "#fff8e6" })));
+}
+
+// Landmarks: small warm markers (names will be shown on hover in a later step)
+const landmarkGeo = new THREE.BoxGeometry(10, 30, 10);
+const landmarkMat = new THREE.MeshLambertMaterial({ color: "#e8703b" });
+const landmarks = new THREE.InstancedMesh(landmarkGeo, landmarkMat, data.landmarks.length);
+const m4 = new THREE.Matrix4();
+data.landmarks.forEach((lm, i) => {
+  m4.makeTranslation(lm.pos[0], 15, lm.pos[1]);
+  landmarks.setMatrixAt(i, m4);
+});
+landmarks.castShadow = true;
+scene.add(landmarks);
+
+console.log("counts", data.counts, data.attribution);
+
+// ---------- controls ----------
 
 function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
@@ -75,7 +197,7 @@ window.addEventListener("resize", onResize);
 window.addEventListener(
   "wheel",
   (e) => {
-    frustum = Math.min(3000, Math.max(800, frustum * (e.deltaY > 0 ? 1.1 : 0.9)));
+    frustum = Math.min(3000, Math.max(300, frustum * (e.deltaY > 0 ? 1.1 : 0.9)));
     onResize();
   },
   { passive: true }
