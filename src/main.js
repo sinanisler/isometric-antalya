@@ -17,7 +17,7 @@ scene.background = new THREE.Color("#cfe9ea");
 
 // Orthographic camera at a true isometric angle (~35.26° pitch, 45° yaw).
 const aspect = () => window.innerWidth / window.innerHeight;
-let frustum = 900;
+let frustum = 2600;
 const camera = new THREE.OrthographicCamera(-frustum * aspect(), frustum * aspect(), frustum, -frustum, 1, 10000);
 camera.position.set(1000, 1000, 1000);
 camera.lookAt(0, 0, 0);
@@ -41,12 +41,14 @@ sea.position.y = -2;
 sea.receiveShadow = true;
 scene.add(sea);
 
-// Land: placeholder plate (replaced by OSM coastline polygons later)
+// Land: placeholder plate north of a straight coastline (replaced by OSM coastline polygons later).
+// Coast is ~lat 36.875 => z ≈ +555 m. Land occupies z < 555; sea is south of it.
+const COAST_Z = 555;
 const land = new THREE.Mesh(
-  new THREE.BoxGeometry(6000, 4, 6000),
+  new THREE.BoxGeometry(12000, 4, 12000),
   new THREE.MeshLambertMaterial({ color: "#a8c77a" })
 );
-land.position.set(0, -2, 0);
+land.position.set(0, 0, COAST_Z - 6000);
 land.receiveShadow = true;
 scene.add(land);
 
