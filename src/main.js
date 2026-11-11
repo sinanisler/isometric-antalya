@@ -13,7 +13,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 canvasHost.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#cfe9ea");
+scene.background = new THREE.Color("#3fb6c4"); // sea color, so no light edge shows when zoomed out
 
 // Orthographic camera at a true isometric angle (~35.26° pitch, 45° yaw).
 const aspect = () => window.innerWidth / window.innerHeight;
@@ -33,7 +33,7 @@ scene.add(new THREE.HemisphereLight("#dff6f2", "#8a9c6a", 0.9));
 
 // Sea: a big plane covering the bay
 const sea = new THREE.Mesh(
-  new THREE.PlaneGeometry(12000, 12000),
+  new THREE.PlaneGeometry(60000, 60000),
   new THREE.MeshLambertMaterial({ color: "#3fb6c4" })
 );
 sea.rotation.x = -Math.PI / 2;
@@ -75,7 +75,7 @@ window.addEventListener("resize", onResize);
 window.addEventListener(
   "wheel",
   (e) => {
-    frustum = Math.min(4000, Math.max(200, frustum * (e.deltaY > 0 ? 1.1 : 0.9)));
+    frustum = Math.min(3000, Math.max(800, frustum * (e.deltaY > 0 ? 1.1 : 0.9)));
     onResize();
   },
   { passive: true }
