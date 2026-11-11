@@ -12,6 +12,7 @@ const root = join(here, "..");
 
 // South, west, north, east
 const BOXES = {
+  "kaleici": [36.8770, 30.6930, 36.8900, 30.7150],
   "kaleici-konyaalti": [36.87, 30.65, 36.89, 30.715],
 };
 
@@ -19,15 +20,17 @@ const ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
   "https://overpass.private.coffee/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass.openstreetmap.fr/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ];
 
-const name = process.argv[2] ?? "kaleici-konyaalti";
+const name = process.argv[2] ?? "kaleici";
 const bbox = BOXES[name];
 if (!bbox) throw new Error(`Unknown bbox "${name}". Known: ${Object.keys(BOXES).join(", ")}`);
 const [s, w, n, e] = bbox;
 
 const query = `
-[out:json][timeout:180];
+[out:json][timeout:120];
 (
   way["building"](${s},${w},${n},${e});
   way["highway"~"^(motorway|trunk|primary|secondary|tertiary|residential|living_street|pedestrian|service|footway|path|steps)$"](${s},${w},${n},${e});
