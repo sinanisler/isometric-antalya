@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { toMeters } from "./geo.js";
+import { buildLandMask } from "./land.js";
 
 // Scene built from data/kaleici.json (converted from OpenStreetMap, ODbL).
 // Coordinates are local meters: x = east, z = south (three.js: -z is north).
@@ -16,7 +17,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("#3fb6c4");
+scene.background = new THREE.Color("#efe6d2");
 
 // Orthographic camera at a true isometric angle, centered on the old town.
 let frustum = 1300;
@@ -60,18 +61,61 @@ const seaMaterial = new THREE.ShaderMaterial({
               + sin((vXZ.x + vXZ.y) * 0.006 + uTime * 0.5);
       float band = floor((w + 3.0) * 1.1) / 6.6; // quantised into a few steps
       gl_FragColor = vec4(mix(uDeep, uLight, band), 1.0);
+      #include <colorspace_fragment>
     }`,
 });
-const sea = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), seaMaterial);
-sea.rotation.x = -Math.PI / 2;
-sea.position.y = -2;
-sea.receiveShadow = true;
-scene.add(sea);
+// No placeholder sea or land plates any more: the coastline mask (below) is the ground.
+// Outside the loaded box there is no data yet, so the background is a neutral paper colour.
 
-const land = new THREE.Mesh(new THREE.BoxGeometry(12000, 4, 12000), new THREE.MeshLambertMaterial({ color: "#e8c488" }));
-land.position.set(0, 0, 555 - 6000); // coast ≈ z 555 m
-land.receiveShadow = true;
-scene.add(land);
+// Real coastline mask over the Kaleiçi box (filled in after the data loads, see below).
+// Water and sand are drawn in one shader: water where the mask is sea, sand on land, foam on the shore.
+const maskMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uMask: { value: null },
+    uMin: { value: new THREE.Vector2() },
+    uSize: { value: new THREE.Vector2(1, 1) },
+    uDeep: { value: new THREE.Color("#2b8fa6") },
+    uLight: { value: new THREE.Color("#5fbfcf") },
+    uSand: { value: new THREE.Color("#e8c488") },
+    uFoam: { value: new THREE.Color("#fff8e6") },
+  },
+  vertexShader: `
+    varying vec2 vXZ;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vXZ = wp.xz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform float uTime;
+    uniform sampler2D uMask;
+    uniform vec2 uMin;
+    uniform vec2 uSize;
+    uniform vec3 uDeep;
+    uniform vec3 uLight;
+    uniform vec3 uSand;
+    uniform vec3 uFoam;
+    varying vec2 vXZ;
+    void main() {
+      vec2 uv = (vXZ - uMin) / uSize;
+      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+      float m = texture2D(uMask, uv).r; // 0 sea, 0.5 shore, 1 land
+      float w = sin(vXZ.x * 0.011 + uTime * 0.9)
+              + sin(vXZ.y * 0.014 - uTime * 0.7)
+              + sin((vXZ.x + vXZ.y) * 0.006 + uTime * 0.5);
+      float band = floor((w + 3.0) * 1.1) / 6.6;
+      vec3 water = mix(uDeep, uLight, band);
+      vec3 col = mix(water, uSand, step(0.75, m));
+      col = mix(col, uFoam, step(0.25, m) * (1.0 - step(0.75, m)));
+      gl_FragColor = vec4(col, 1.0);
+      #include <colorspace_fragment>
+    }`,
+});
+const maskPlane = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), maskMaterial);
+maskPlane.rotation.x = -Math.PI / 2;
+maskPlane.position.y = 2.2;
+scene.add(maskPlane);
 
 // ---------- helpers ----------
 
@@ -207,6 +251,25 @@ data.landmarks.forEach((lm, i) => {
 landmarks.castShadow = true;
 scene.add(landmarks);
 
+// Coastline mask over the bounding box of the data
+{
+  const [s, w, n, e] = [36.877, 30.693, 36.89, 30.715]; // must match tools/fetch-osm.mjs BOXES.kaleici
+  const [xa, za] = toMeters(n, w);
+  const [xb, zb] = toMeters(s, e);
+  const bounds = [Math.min(xa, xb), Math.min(za, zb), Math.max(xa, xb), Math.max(za, zb)];
+  const landPoint = toMeters(36.8849, 30.7056); // Kaleiçi old town: land
+  const seaPoint = [(bounds[0] + bounds[2]) / 2, bounds[3] - 5]; // south edge of the box: sea
+  const mask = buildLandMask({ coast: data.coast, bounds, landPoint, seaPoint });
+  console.log("land mask", mask.stats);
+
+  maskMaterial.uniforms.uMask.value = mask.texture;
+  maskMaterial.uniforms.uMin.value.set(mask.min[0], mask.min[1]);
+  maskMaterial.uniforms.uSize.value.set(mask.size[0], mask.size[1]);
+  maskPlane.geometry.dispose();
+  maskPlane.geometry = new THREE.PlaneGeometry(mask.size[0], mask.size[1]);
+  maskPlane.position.set(mask.min[0] + mask.size[0] / 2, 2.2, mask.min[1] + mask.size[1] / 2);
+}
+
 console.log("counts", data.counts, data.attribution);
 
 // ---------- controls ----------
@@ -232,5 +295,6 @@ window.addEventListener(
 
 renderer.setAnimationLoop(() => {
   seaMaterial.uniforms.uTime.value = performance.now() / 1000;
+  maskMaterial.uniforms.uTime.value = performance.now() / 1000;
   renderer.render(scene, camera);
 });

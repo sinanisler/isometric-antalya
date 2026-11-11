@@ -32,13 +32,17 @@ Attribution required for any published output: "© OpenStreetMap contributors".
 
 - [x] Repo set up, first commit
 - [x] Reference images copied to `docs/references/`
-- [ ] OSM fetch script (blocked for now: Overpass public servers returning 502 "at capacity"; retry with backoff)
-- [ ] Scene data build script
-- [ ] Three.js isometric scene — terrain + sea + coastline
-- [ ] Buildings from OSM
-- [ ] Roads and landmarks (Kaleiçi walls, Hadrian's Gate, Yivli Minaret, Clock Tower, Konyaaltı beach, Lara beach)
-- [ ] Ghibli-style pass (palette, lighting, outlines)
-- [ ] Lara district
+- [x] OSM fetch: uses the OSM map API (Overpass was at capacity); raw XML in `data/raw/` (git-ignored)
+- [x] Scene data build: `tools/osm-to-json.mjs` → `data/kaleici.json`
+- [x] Three.js scene renders from the data; headless check via `tools/shot-scene.mjs`
+- [x] Buildings from OSM (extruded, banded by height)
+- [x] Coastline: land/sea mask from the OSM coastline (`src/land.js`), animated water and foam on the shore
+- [x] Palette from the tinyrj reference (`docs/references/inspiration.md`)
+- [ ] Clip landuse/park polygons to the data box (a large green wedge currently extends outside it)
+- [ ] Roads and landmarks: landmark names and hover labels; roads currently drawn without labels
+- [ ] Konyaaltı and Lara data boxes (fetch + convert)
+- [ ] Ghibli-style pass (outlines, soft shading, painted texture)
+- [ ] Blender: connection still needs the Blender-side server started (see notes)
 
 ## Open questions for later
 
