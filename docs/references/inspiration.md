@@ -17,3 +17,26 @@ Shared by Sinan. Their look is the target direction; we learn from the approach,
 ## Still needed
 
 - Screenshots of tinyrj.com maps you like, saved to `docs/references/inspiration/`. Text can't carry palette, lighting or outline style; screenshots can.
+
+## tinyrj style, read from a live capture (Copacabana view)
+
+Screenshots are local only (git-ignored): `docs/references/inspiration/screens/`.
+
+Approximate colours, read by eye from the capture (not sampled exactly):
+
+| Element | Approx colour |
+|---|---|
+| Facades, cream/white | `#f2ece0` |
+| Facades, sky blue | `#9fc6e0` |
+| Facades, warm yellow/ochre | `#e8c27a` |
+| Roofs, terracotta/orange | `#d9643a` |
+| Sand | `#e8c488` |
+| Trees, leafy green | `#5f9b4a` |
+| Roads, grey | `#8a8d92` |
+| Pale blocks/sidewalks, patterned | `#efe6d2` |
+
+What we take from it:
+- Chunky, slightly voxel-like 3D buildings with soft shading. Good match for low-poly extrusions.
+- Orange roofs against pale facades; pale sidewalks with patterned paving.
+- Trees as clumped round shapes; cars and people as tiny coloured dots.
+- Compact UI overlays (search, zoom, mode switch) float over the map.
