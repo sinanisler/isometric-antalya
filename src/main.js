@@ -35,14 +35,40 @@ Object.assign(sun.shadow.camera, { left: -1500, right: 1500, top: 1500, bottom: 
 scene.add(sun, sun.target);
 scene.add(new THREE.HemisphereLight("#dff6f2", "#8a9c6a", 0.9));
 
-// Sea and land (placeholder plates until coastline polygons are built)
-const sea = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), new THREE.MeshLambertMaterial({ color: "#3fb6c4" }));
+// Sea: stylised animated water. Stepped colour bands (pixel-like) moving slowly over time.
+const seaMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0 },
+    uDeep: { value: new THREE.Color("#2b8fa6") },
+    uLight: { value: new THREE.Color("#5fbfcf") },
+  },
+  vertexShader: `
+    varying vec2 vXZ;
+    void main() {
+      vec4 wp = modelMatrix * vec4(position, 1.0);
+      vXZ = wp.xz;
+      gl_Position = projectionMatrix * viewMatrix * wp;
+    }`,
+  fragmentShader: `
+    uniform float uTime;
+    uniform vec3 uDeep;
+    uniform vec3 uLight;
+    varying vec2 vXZ;
+    void main() {
+      float w = sin(vXZ.x * 0.011 + uTime * 0.9)
+              + sin(vXZ.y * 0.014 - uTime * 0.7)
+              + sin((vXZ.x + vXZ.y) * 0.006 + uTime * 0.5);
+      float band = floor((w + 3.0) * 1.1) / 6.6; // quantised into a few steps
+      gl_FragColor = vec4(mix(uDeep, uLight, band), 1.0);
+    }`,
+});
+const sea = new THREE.Mesh(new THREE.PlaneGeometry(60000, 60000), seaMaterial);
 sea.rotation.x = -Math.PI / 2;
 sea.position.y = -2;
 sea.receiveShadow = true;
 scene.add(sea);
 
-const land = new THREE.Mesh(new THREE.BoxGeometry(12000, 4, 12000), new THREE.MeshLambertMaterial({ color: "#a8c77a" }));
+const land = new THREE.Mesh(new THREE.BoxGeometry(12000, 4, 12000), new THREE.MeshLambertMaterial({ color: "#e8c488" }));
 land.position.set(0, 0, 555 - 6000); // coast ≈ z 555 m
 land.receiveShadow = true;
 scene.add(land);
@@ -107,10 +133,11 @@ const ROAD_COLOR = {
   pedestrian: "#e9d9bd", service: "#e4dccb", footway: "#d9c8a4", path: "#c8b58f", steps: "#c8b58f",
 };
 
+// Palette taken from the tinyrj reference (see docs/references/inspiration.md)
 const BUILDING_BANDS = [
-  { max: 6, color: "#f4e6c9" },   // low: cream
-  { max: 12, color: "#e8c7a0" },  // mid: warm sand
-  { max: Infinity, color: "#d9a57e" }, // tall: terracotta
+  { max: 6, color: "#f2ece0" },        // low: cream
+  { max: 12, color: "#9fc6e0" },       // mid: sky blue
+  { max: Infinity, color: "#e8c27a" }, // tall: warm ochre
 ];
 const bandFor = (h) => BUILDING_BANDS.find((b) => h <= b.max).color;
 
@@ -156,7 +183,7 @@ for (const [color, geos] of roadGroups) {
 // Parks and beaches
 const parkGeos = data.parks.map((p) => polygonGeometry(p.pts)).filter(Boolean);
 if (parkGeos.length) {
-  const mesh = new THREE.Mesh(mergeGeometries(parkGeos), new THREE.MeshLambertMaterial({ color: "#9bcf7a" }));
+  const mesh = new THREE.Mesh(mergeGeometries(parkGeos), new THREE.MeshLambertMaterial({ color: "#5f9b4a" }));
   mesh.position.y = 0.4;
   mesh.receiveShadow = true;
   scene.add(mesh);
@@ -203,4 +230,7 @@ window.addEventListener(
   { passive: true }
 );
 
-renderer.setAnimationLoop(() => renderer.render(scene, camera));
+renderer.setAnimationLoop(() => {
+  seaMaterial.uniforms.uTime.value = performance.now() / 1000;
+  renderer.render(scene, camera);
+});
